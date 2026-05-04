@@ -110,15 +110,48 @@ variable "lab_prefix" {
 '''
 
 TF_SSH = '''
-resource "openstack_compute_keypair_v2" "vtds_lab_key" {
-  name       = "${var.lab_prefix}_lab_key"
-  public_key = tls_private_key.default.public_key_openssh
+resource "tls_private_key" "default" {
+  algorithm   = "ECDSA"
+  ecdsa_curve = "P384"
+}
+
+resource "local_file" "private_key_pem" {
+
+  depends_on = [tls_private_key.default]
+
+  content  = tls_private_key.default.private_key_pem
+  filename = "default.pem"
+}
+
+resource "null_resource" "chmod" {
+  depends_on = [local_file.private_key_pem]
+
+  triggers = {
+    local_file_private_key_pem = "local_file.private_key_pem"
+  }
+
+  provisioner "local-exec" {
+    command = "chmod 600 default.pem"
+  }
 }
 '''
 
 TF_COMPUTE = '''
+resource "openstack_compute_keypair_v2" "vtds_lab_key" {
+  name       = "${var.lab_prefix}_lab_key"
+  public_key = tls_private_key.default.public_key_openssh
+}
+
 data "openstack_networking_network_v2" "lab_network" {
   name = var.lab_net_ipv4
+}
+
+resource "openstack_networking_port_v2" "lab_port" {
+  count          = var.lab_count
+  name           = format("%s-lab-%02d", var.lab_prefix, count.index)
+  admin_state_up = true
+
+  network_id = data.openstack_networking_network_v2.lab_network.id
 }
 
 resource "openstack_compute_instance_v2" "lab" {
@@ -149,7 +182,7 @@ resource "openstack_compute_instance_v2" "lab" {
     create = "30m"
   }
 
-  depends_on = [openstack_compute_keypair_v2.vtds_lab_key, null_resource.registry]
+  depends_on = [openstack_compute_keypair_v2.vtds_lab_key]
 }
 '''
 
@@ -263,21 +296,21 @@ class Provider(ProviderAPI):
             fp.write( TF_COMPUTE )
         with open( self.tofu_dir + "/terraform.tfvars", 'w' ) as fp:
             if( self.config['lab_flavor'] ):
-                fp.write( f"lab_flavor = {self.config['lab_flavor']}" )
+                fp.write( f"lab_flavor = \"{self.config['lab_flavor']}\"\n" )
             if( self.config['boot_labs_from_volume'] ):
-                fp.write( f"boot_labs_from_voluem = {self.config['boot_labs_from_volume']}" )
+                fp.write( f"boot_labs_from_voluem = {self.config['boot_labs_from_volume']}\n" )
             if( self.config['image_id'] ):
-                fp.write( f"image_id = {self.config['image_id']}" )
+                fp.write( f"image_id = \"{self.config['image_id']}\"\n" )
             if( self.config['image_name'] ):
-                fp.write( f"image_name = {self.config['image_name']}" )
+                fp.write( f"image_name = \"{self.config['image_name']}\"\n" )
             if( self.config['lab_count'] ):
-                fp.write( f"lab_count = {self.config['lab_count']}" )
+                fp.write( f"lab_count = {self.config['lab_count']}\n" )
             if( self.config['lab_data_vol'] ):
-                fp.write( f"lab_data_vol = {self.config['lab_data_vol']}" )
+                fp.write( f"lab_data_vol = {self.config['lab_data_vol']}\n" )
             if( self.config['lab_net_ipv4'] ):
-                fp.write( f"lab_net_ipv4 = {self.config['lab_net_ipv4']}" )
+                fp.write( f"lab_net_ipv4 = \"{self.config['lab_net_ipv4']}\"\n" )
             if( self.config['lab_prefix'] ):
-                fp.write( f"lab_prefix = {self.config['lab_prefix']}" )
+                fp.write( f"lab_prefix = \"{self.config['lab_prefix']}\"\n" )
 
         self.__run( "init", "prepare", 30 )
         self.prepared = True
