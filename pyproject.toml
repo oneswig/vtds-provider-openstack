@@ -22,9 +22,10 @@
 # OTHER DEALINGS IN THE SOFTWARE.
 #
 [project]
-name = 'vtds_provider_mock'
+name = 'vtds_provider_openstack'
 authors = [
     { name = 'Eric Lund', email = 'eric.lund@hpe.com' },
+    { name = 'Stig Telfer', email = 'stig@stackhpc.com' },
 ]
 classifiers = [
     'License :: OSI Approved :: MIT License',
@@ -46,13 +47,13 @@ dependencies = [
 
 dynamic = ['version']
 maintainers = [
-    { name = 'Eric Lund', email = 'eric.lund@hpe.com' },
+    { name = 'Stig Telfer', email = 'stig@stackhpc.com' },
 ]
 readme = { file = 'README.md', content-type = 'text/markdown' }
 requires-python = '>=3.9'
 
 [metadata]
-url = 'https://github.com/Cray-HPE/vtds-provider-mock'
+url = 'https://github.com/oneswig/vtds-provider-openstack'
 
 license = { file = 'LICENSE' }
 
@@ -82,8 +83,8 @@ test = [
 
 # Defines which folders belong to our package.
 [tool.setuptools.packages.find]
-include = ['vtds_provider_mock*', 'vtds_provider_mock.private*']
-exclude = ['vtds_provider_mock.tests*']
+include = ['vtds_provider_openstack*', 'vtds_provider_openstack.private*']
+exclude = ['vtds_provider_openstack.tests*']
 
 [tool.setuptools.dynamic]
 

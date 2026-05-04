@@ -1,4 +1,4 @@
-# vtds-provider-mock
+# vtds-provider-openstack
 
-A mock Provider layer for the vTDS suite to be used in testing other
+An OpenStack Provider layer for the vTDS suite to be used in testing other
 layers and in testing the vTDS Core.

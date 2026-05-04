@@ -21,7 +21,7 @@
 # ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 # OTHER DEALINGS IN THE SOFTWARE.
 """Private layer code to manage secrets and translate between API secret
-operations and GCP secret operations.
+operations and OpenStack secret operations.
 
 """
 from vtds_base import (
@@ -31,7 +31,7 @@ from vtds_base import (
 
 class SecretManager:
     """Class providing operations for creating and removing secrets as
-    needed from a the GCP secret manager.
+    needed from a secret manager.
 
     """
     def __init__(self, config):
@@ -60,9 +60,9 @@ class SecretManager:
 
     def deploy(self):
         """Deploy all secrets declared by any layer during the
-        'prepare' phase to the GCP Secret Manager. This creates the
+        'prepare' phase to the OpenStack Secret Manager. This creates the
         secrets as place holders for content. It is up to the users of
-        the secrets to fill them with data (create versions in GCP
+        the secrets to fill them with data (create versions in OpenStack
         parlance) by calling into the provider API for storing data in
         secrets.
 
@@ -70,7 +70,7 @@ class SecretManager:
 
     def remove(self):
         """Remove all secrets declared by any layer during the
-        'prepare' phase from the GCP Secret Manager.
+        'prepare' phase from the OpenStack Secret Manager.
 
         """
         self.secrets = {}

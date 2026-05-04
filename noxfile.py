@@ -40,7 +40,7 @@ def lint(session):
     """
     run_cmd = [
         'pylint',
-        'vtds_provider_mock',
+        'vtds_provider_openstack',
     ]
     if session.python:
         session.install('.[lint]')
@@ -55,7 +55,7 @@ def style(session):
     run_cmd = [
         'pycodestyle',
         '--config=.pycodestyle',
-        'vtds_provider_mock',
+        'vtds_provider_openstack',
     ]
  
     if session.python:

@@ -20,7 +20,7 @@
 # OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
 # ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 # OTHER DEALINGS IN THE SOFTWARE.
-"""Private layer implementation module for the mock provider.
+"""Private layer implementation module for the OpenStack provider.
 
 """
 
@@ -39,7 +39,7 @@ from .common import Common
 
 
 class Provider(ProviderAPI):
-    """Provider class, implements the mock provider layer
+    """Provider class, implements the OpenStack provider layer
     accessed through the python Provider API.
 
     """
@@ -65,7 +65,7 @@ class Provider(ProviderAPI):
         return
 
     def prepare(self):
-        print("Preparing vtds-provider-mock")
+        print("Preparing vtds-provider-openstack")
         self.prepared = True
 
     def validate(self):
@@ -74,21 +74,21 @@ class Provider(ProviderAPI):
                 "cannot validate an unprepared provider, "
                 "call prepare() first"
             )
-        print("Validating vtds-provider-mock")
+        print("Validating vtds-provider-openstack")
 
     def deploy(self):
         if not self.prepared:
             raise ContextualError(
                 "cannot deploy an unprepared provider, call prepare() first"
             )
-        print("Deploying vtds-provider-mock")
+        print("Deploying vtds-provider-openstack")
 
     def remove(self):
         if not self.prepared:
             raise ContextualError(
                 "cannot deploy an unprepared provider, call prepare() first"
             )
-        print("Removing vtds-provider-mock")
+        print("Removing vtds-provider-openstack")
 
     def get_virtual_blades(self):
         return VirtualBlades(self.common)

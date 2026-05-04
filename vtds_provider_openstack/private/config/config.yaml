@@ -23,23 +23,23 @@
 #
 provider:
   blade_interconnects:
-    mock_interconnect:
-      network_name: mock-interconnect
+    openstack_interconnect:
+      network_name: openstack-interconnect
       ipv4_cidr: 10.255.0.0/16
   virtual_blades:
-    mock_blade:
+    openstack_blade:
       count: 3
       hostnames:
-        - mock-001
-        - mock-002
-        - mock-003
+        - openstack-001
+        - openstack-002
+        - openstack-003
       blade_interconnect:
-        name: mock-interconnect
+        name: openstack-interconnect
         ip_addrs:
         - 10.255.0.1
         - 10.255.0.2
         - 10.255.0.3
-      ssh_key_secret: mock-ssh-secret
+      ssh_key_secret: openstack-ssh-secret
   secrets:
-    mock_ssh_secret:
-      name: mock-ssh-secret
+    openstack_ssh_secret:
+      name: openstack-ssh-secret
