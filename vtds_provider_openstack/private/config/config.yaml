@@ -24,22 +24,5 @@
 provider:
   blade_interconnects:
     openstack_interconnect:
-      network_name: openstack-interconnect
-      ipv4_cidr: 10.255.0.0/16
-  virtual_blades:
-    openstack_blade:
-      count: 3
-      hostnames:
-        - openstack-001
-        - openstack-002
-        - openstack-003
-      blade_interconnect:
-        name: openstack-interconnect
-        ip_addrs:
-        - 10.255.0.1
-        - 10.255.0.2
-        - 10.255.0.3
-      ssh_key_secret: openstack-ssh-secret
-  secrets:
-    openstack_ssh_secret:
-      name: openstack-ssh-secret
+      network_name: "stackhpc-ipv4-academy-subnet"
+      ipv4_cidr: "172.16.4.0/24"

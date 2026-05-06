@@ -76,7 +76,8 @@ variable "lab_flavor" {
 # Can be set to true to give VMs more storage space.
 variable "boot_labs_from_volume" {
   description = "Whether or not to boot labs from volume."
-  default     = "false"
+  default     = false
+  type        = bool
 }
 
 variable "image_id" {
@@ -100,7 +101,14 @@ variable "lab_data_vol" {
 
 variable "lab_net_ipv4" {
   description = "Network for lab"
-  default     = "aufn-ipv4-vlan"
+}
+
+variable "lab_subnet" {
+  description = "Subnet for lab"
+}
+
+variable "lab_fixed_ips" {
+  description = "Array of IP addresses for lab hosts"
 }
 
 variable "lab_prefix" {
@@ -120,7 +128,15 @@ resource "local_file" "private_key_pem" {
   depends_on = [tls_private_key.default]
 
   content  = tls_private_key.default.private_key_pem
-  filename = "default.pem"
+  filename = "private_key.pem"
+}
+
+resource "local_file" "public_key_pem" {
+
+  depends_on = [tls_private_key.default]
+
+  content  = tls_private_key.default.public_key_pem
+  filename = "public_key.pem"
 }
 
 resource "null_resource" "chmod" {
@@ -131,9 +147,10 @@ resource "null_resource" "chmod" {
   }
 
   provisioner "local-exec" {
-    command = "chmod 600 default.pem"
+    command = "chmod 600 private_key.pem public_key.pem"
   }
 }
+
 '''
 
 TF_COMPUTE = '''
@@ -152,12 +169,17 @@ resource "openstack_networking_port_v2" "lab_port" {
   admin_state_up = true
 
   network_id = data.openstack_networking_network_v2.lab_network.id
+
+  fixed_ip {
+    subnet_id = var.lab_subnet
+    ip_address = var.lab_fixed_ips[count.index]
+  }
 }
 
 resource "openstack_compute_instance_v2" "lab" {
 
   count           = var.lab_count
-  name            = format("%s-lab-%02d", var.lab_prefix, count.index)
+  name            = format("%s-%02d", var.lab_prefix, count.index)
   image_name      = var.image_name
   flavor_name     = var.lab_flavor
   key_pair        = openstack_compute_keypair_v2.vtds_lab_key.name
@@ -187,6 +209,25 @@ resource "openstack_compute_instance_v2" "lab" {
 '''
 
 
+TF_OUTPUT = '''
+locals {
+  template = {
+    labs     = tomap({ names = openstack_compute_instance_v2.lab.*.name, ips = openstack_compute_instance_v2.lab.*.access_ip_v4 })
+  }
+}
+
+resource "local_file" "lab_hosts" {
+  content  = templatefile("lab_hosts.tpl", local.template)
+  filename = "lab_hosts.dat"
+}
+'''
+
+TF_OUTPUT_TPL = '''%{ for name, ip in zipmap(labs.names, labs.ips) ~}
+${name} ${ip}
+%{ endfor ~}
+'''
+
+
 class Provider(ProviderAPI):
     """Provider class, implements the OpenStack provider layer
     accessed through the python Provider API.
@@ -212,7 +253,7 @@ class Provider(ProviderAPI):
         self.prepared = False
 
 
-    def __run(self, operation, tag, timeout=None):
+    def __run(self, operation, tag, timeout=None, auto_approve=False):
         """Run a tofu operation in the build tree capturing the output in 
         separate output and error logs for later analysis.
 
@@ -226,12 +267,11 @@ class Provider(ProviderAPI):
                 write_out(
                     "running tofu %s[%s] in '%s'" % (operation, tag, self.tofu_dir)
                 )
+                command = [ 'tofu', operation ]
+                if auto_approve:
+                    command += ['-auto-approve']
                 with subprocess.Popen(
-                    [
-                        'tofu',
-                        operation
-                    ],
-                    stdout=out, stderr=err, cwd=self.tofu_dir
+                    command, stdout=out, stderr=err, cwd=self.tofu_dir
                 ) as sub:
                     time = 0
                     signaled = False
@@ -286,6 +326,7 @@ class Provider(ProviderAPI):
             os.mkdir( self.tofu_dir )
         except FileExistsError:
             pass
+
         with open( self.tofu_dir + "/providers.tf", 'w' ) as fp:
             fp.write( TF_PROVIDER )
         with open( self.tofu_dir + "/vars.tf", 'w' ) as fp:
@@ -294,23 +335,42 @@ class Provider(ProviderAPI):
             fp.write( TF_SSH )
         with open( self.tofu_dir + "/compute.tf", 'w' ) as fp:
             fp.write( TF_COMPUTE )
+        with open( self.tofu_dir + "/output.tf", 'w' ) as fp:
+            fp.write( TF_OUTPUT )
+        with open( self.tofu_dir + "/lab_hosts.tpl", 'w' ) as fp:
+            fp.write( TF_OUTPUT_TPL )
         with open( self.tofu_dir + "/terraform.tfvars", 'w' ) as fp:
-            if( self.config['lab_flavor'] ):
-                fp.write( f"lab_flavor = \"{self.config['lab_flavor']}\"\n" )
-            if( self.config['boot_labs_from_volume'] ):
-                fp.write( f"boot_labs_from_voluem = {self.config['boot_labs_from_volume']}\n" )
-            if( self.config['image_id'] ):
-                fp.write( f"image_id = \"{self.config['image_id']}\"\n" )
-            if( self.config['image_name'] ):
-                fp.write( f"image_name = \"{self.config['image_name']}\"\n" )
-            if( self.config['lab_count'] ):
-                fp.write( f"lab_count = {self.config['lab_count']}\n" )
-            if( self.config['lab_data_vol'] ):
-                fp.write( f"lab_data_vol = {self.config['lab_data_vol']}\n" )
-            if( self.config['lab_net_ipv4'] ):
-                fp.write( f"lab_net_ipv4 = \"{self.config['lab_net_ipv4']}\"\n" )
-            if( self.config['lab_prefix'] ):
-                fp.write( f"lab_prefix = \"{self.config['lab_prefix']}\"\n" )
+            # Simplification: we only process the first kind of 'virtual_blade'
+            # vTDS throws our way.
+            blade_type = list(self.config['virtual_blades'].keys())[0]
+            blade_config = self.config['virtual_blades'][blade_type]
+            blade_inter = blade_config['blade_interconnect']
+
+            # Virtual blade stuff
+            if( 'lab_flavor' in blade_config ):
+                fp.write( f"lab_flavor = \"{blade_config['lab_flavor']}\"\n" )
+            if( 'boot_labs_from_volume' in blade_config ):
+                fp.write( "boot_labs_from_volume = %s\n" % ('true' if blade_config['boot_labs_from_volume'] else 'false') )
+            if( 'image_id' in blade_config ):
+                fp.write( f"image_id = \"{blade_config['image_id']}\"\n" )
+            if( 'image_name' in blade_config ):
+                fp.write( f"image_name = \"{blade_config['image_name']}\"\n" )
+            if( 'lab_data_vol' in blade_config ):
+                fp.write( f"lab_data_vol = {blade_config['lab_data_vol']}\n" )
+            if( 'lab_count' in blade_config ):
+                fp.write( f"lab_count = {blade_config['count']}\n" )
+            if( 'lab_prefix' in blade_config ):
+                fp.write( f"lab_prefix = \"{blade_config['lab_prefix']}\"\n" )
+
+            # Interconnect stuff
+            if( 'lab_net_ipv4' in blade_inter ):
+                fp.write( f"lab_net_ipv4 = \"{blade_inter['lab_net_ipv4']}\"\n" )
+            if( 'lab_subnet' in blade_inter ):
+                fp.write( f"lab_subnet = \"{blade_inter['lab_subnet']}\"\n" )
+            fp.write( "lab_fixed_ips = [" )
+            for ip in blade_inter['ip_addrs']:
+                fp.write( f' "{ip}",' )
+            fp.write( " ]\n" )
 
         self.__run( "init", "prepare", 30 )
         self.prepared = True
@@ -330,6 +390,24 @@ class Provider(ProviderAPI):
                 "cannot deploy an unprepared provider, call prepare() first"
             )
         print("Deploying vtds-provider-openstack")
+        self.__run( "apply", "deploy", 300, True )
+
+        # Read in the hostnames as deployed.
+        # They will be written out to a data file by the Tofu resources.
+        hostnames = []
+        with open( self.tofu_dir + "/lab_hosts.dat", 'r') as fp:
+            for line in fp:
+                hostname, ip = line.split()
+                hostnames += [ip]
+                # FIXME: we should be able to use hostnames
+                # but vTDS is assuming they are resolvable, which is
+                # not always true
+                #hostnames += [hostname]
+
+        # Assume we are only interested in the first blade type
+        blade_type = list(self.config['virtual_blades'].keys())[0]
+        blade_config = self.config['virtual_blades'][blade_type]
+        blade_config['hostnames'] = hostnames
 
     def remove(self):
         if not self.prepared:
@@ -337,6 +415,7 @@ class Provider(ProviderAPI):
                 "cannot deploy an unprepared provider, call prepare() first"
             )
         print("Removing vtds-provider-openstack")
+        self.__run( "destroy", "remove", 120, True )
 
     def get_virtual_blades(self):
         return VirtualBlades(self.common)

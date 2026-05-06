@@ -23,9 +23,22 @@
 """Private implementations of API objects.
 
 """
+from subprocess import (
+    Popen,
+    TimeoutExpired
+)
+from socketserver import TCPServer
+from socket import (
+    socket,
+    AF_INET,
+    SOCK_STREAM
+)
+from time import sleep
+
 from vtds_base import (
     ContextualError,
     log_paths,
+    logfile,
     info_msg,
     render_command_string
 )
@@ -102,8 +115,7 @@ class VirtualBlades(VirtualBladesBase):
         return self.common.blade_ssh_key_secret(blade_class)
 
     def blade_ssh_key_paths(self, blade_class):
-        secret_name = self.common.blade_ssh_key_secret(blade_class)
-        return self.common.ssh_key_paths(secret_name)
+        return self.common.ssh_key_paths()
 
     def connect_blade(self, blade_class, instance, remote_port):
         return BladeConnection(
@@ -232,6 +244,7 @@ class BladeConnection(BladeConnectionBase):
         """Constructor
 
         """
+        self.__doc__ = BladeConnectionBase.__doc__
         self.common = common
         self.b_class = blade_class
         self.instance = instance
@@ -240,7 +253,18 @@ class BladeConnection(BladeConnectionBase):
             blade_class, instance
         )
         self.loc_ip = "127.0.0.1"
-        self.loc_port = 12345
+        self.loc_port = None
+        self.log_out = None
+        self.log_err = None
+        self._connect()
+
+    def _connect(self):
+        """Layer private operation: establish the connection and learn
+        the local IP and port of the connection.
+
+        """
+        # Nothing needed, job done
+        return
 
     def __enter__(self):
         return self
@@ -251,8 +275,8 @@ class BladeConnection(BladeConnectionBase):
             exception_value=None,
             traceback=None
     ):
-        # Nothing really to do here...
-        pass
+        # Nothing needed, job done
+        return
 
     def blade_class(self):
         return self.b_class
@@ -263,11 +287,13 @@ class BladeConnection(BladeConnectionBase):
     def remote_port(self):
         return self.rem_port
 
+    # Placeholder
     def local_ip(self):
-        return self.loc_ip
+        return '127.0.0.1'
 
+    # Placeholder
     def local_port(self):
-        return self.loc_port
+        return 0
 
 
 class BladeConnectionSet(BladeConnectionSetBase):
@@ -282,6 +308,7 @@ class BladeConnectionSet(BladeConnectionSetBase):
         """Constructor
 
         """
+        self.__doc__ = BladeConnectionSetBase.__doc__
         self.common = common
         self.blade_connections = blade_connections
 
@@ -298,11 +325,6 @@ class BladeConnectionSet(BladeConnectionSetBase):
             connection.__exit__(exception_type, exception_value, traceback)
 
     def list_connections(self, blade_class=None):
-        """List the connections in the BladeConnectionSet filtered by
-        'blade_class' if that is present. Otherwise imply list all of
-        the connections.
-
-        """
         return [
             blade_connection for blade_connection in self.blade_connections
             if blade_class is None or
@@ -310,23 +332,28 @@ class BladeConnectionSet(BladeConnectionSetBase):
         ]
 
     def get_connection(self, hostname):
-        """Return the connection corresponding to the specified
-        VirtualBlade hostname ('hostname') or None if the hostname is
-        not found.
-
-        """
         for blade_connection in self.blade_connections:
             if blade_connection.blade_hostname() == hostname:
                 return blade_connection
         return None
 
 
+
 # The following is shared by BladeSSHConnection and
 # BladeSSHConnectionSet. This should be treaded as private to
 # this file. It is pulled out of both classes for easy sharing.
 def wait_for_popen(subprocess, cmd, logpaths, timeout=None, **kwargs):
-    """Mock up of a Wait for a Popen() object to reach completion and
-    return the exit value. It really just returns.
+    """Wait for a Popen() object to reach completion and return
+    the exit value.
+
+    If 'check' is either omitted from the keyword arguments or is
+    supplied in the keyword aguments and True, raise a
+    ContextualError if the command exists with a non-zero exit
+    value, otherwise simply return the exit value.
+
+    If 'timeout' is supplied (in seconds) and exceeded kill the
+    Popen() object and then raise a ContextualError indicating the
+    timeout and reporting where the command logs can be found.
 
     """
     info_msg(
@@ -335,7 +362,35 @@ def wait_for_popen(subprocess, cmd, logpaths, timeout=None, **kwargs):
             str(subprocess), str(cmd), str(logpaths), str(timeout), str(kwargs)
         )
     )
-    return 0
+    check = kwargs.get('check', True)
+    time = timeout if timeout is not None else 0
+    signaled = False
+    while True:
+        try:
+            exitval = subprocess.wait(timeout=5)
+            break
+        except TimeoutExpired:
+            time -= 5 if timeout is not None else 0
+            if timeout is not None and time <= 0:
+                if not signaled:
+                    # First try to terminate the process
+                    subprocess.terminate()
+                    continue
+                subprocess.kill()
+                # pylint: disable=raise-missing-from
+                raise ContextualError(
+                    "SSH command '%s' timed out and did not terminate "
+                    "as expected after %d seconds" % (str(cmd), time),
+                    *logpaths
+                )
+            continue
+    if check and exitval != 0:
+        raise ContextualError(
+            "SSH command '%s' terminated with a non-zero "
+            "exit status '%d'" % (str(cmd), exitval),
+            *logpaths
+        )
+    return exitval
 
 
 class BladeSSHConnection(BladeSSHConnectionBase, BladeConnection):
@@ -345,7 +400,6 @@ class BladeSSHConnection(BladeSSHConnectionBase, BladeConnection):
     using SSH.
 
     """
-    # pylint: disable=unused-argument
     def __init__(
         self,
         common, blade_class, instance,  private_key_path, remote_port=22,
@@ -355,6 +409,13 @@ class BladeSSHConnection(BladeSSHConnectionBase, BladeConnection):
             self,
             common, blade_class, instance, remote_port
         )
+        self.__doc__ = BladeSSHConnectionBase.__doc__
+        default_opts = [
+            '-o', 'BatchMode=yes',
+            '-o', 'NoHostAuthenticationForLocalhost=yes',
+            '-o', 'StrictHostKeyChecking=no',
+        ]
+        self.options = kwargs.get('options', default_opts)
         self.private_key_path = private_key_path
 
     def __enter__(self):
@@ -369,6 +430,30 @@ class BladeSSHConnection(BladeSSHConnectionBase, BladeConnection):
         BladeConnection.__exit__(
             self, exception_type, exception_value, traceback
         )
+
+    def __run(
+        self, cmd, blocking=True, out_path=None, err_path=None,  **kwargs
+    ):
+        """Run an arbitrary command under Popen() either synchronously
+        or asynchronously letting exceptions bubble up to the caller.
+
+        """
+        with logfile(out_path) as out_file, logfile(err_path) as err_file:
+            if blocking:
+                with Popen(
+                        cmd,
+                        stdout=out_file, stderr=err_file,
+                        **kwargs
+                ) as subprocess:
+                    return wait_for_popen(
+                        subprocess, cmd, (out_path, err_path), None, **kwargs
+                    )
+            else:
+                return Popen(
+                    cmd,
+                    stdout=out_file, stderr=err_file,
+                    **kwargs
+                )
 
     def _render_cmd(self, cmd):
         """Layer private: render the specified command string with
@@ -386,37 +471,92 @@ class BladeSSHConnection(BladeSSHConnectionBase, BladeConnection):
         }
         return render_command_string(cmd, jinja_values)
 
-    # pylint: disable=too-many-function-args
     def copy_to(
             self, source, destination,
             recurse=False, blocking=True, logname=None, **kwargs
     ):
-        info_msg(
-            "%scopying from '%s' to root@%s:%s "
-            "[blocking=%s, logname=%s, kwargs=%s]" % (
-                "recursively " if recurse else "",
-                source, self.hostname, destination,
-                str(blocking), str(logname), str(kwargs)
-            )
+        logname = (
+            logname if logname is not None else
+            "copy-to-%s-%s" % (source, destination)
         )
+        logfiles = log_paths(
+            self.common.build_dir(),
+            "%s-%s" % (logname, self.blade_hostname())
+        )
+        recurse_option = ['-r'] if recurse else []
+        cmd = [
+            'scp', '-i', self.private_key_path, *recurse_option, *self.options,
+            source,
+            'root@%s:%s' % (self.hostname, destination)
+        ]
+        try:
+            return self.__run(cmd, blocking, *logfiles, **kwargs)
+        except ContextualError:
+            # If it is one of ours just send it on its way to be handled
+            raise
+        except Exception as err:
+            # Not one of ours, turn it into one of ours
+            raise ContextualError(
+                "failed to copy file '%s' to 'root@%s:%s' "
+                "using command: %s - %s" % (
+                    source, self.hostname, destination, str(cmd), str(err)
+                ),
+                *logfiles
+            ) from err
 
-    # pylint: disable=too-many-function-args
     def copy_from(
         self, source, destination,
             recurse=False, blocking=True, logname=None, **kwargs
     ):
-        info_msg(
-            "%scopying from root@%s:%s to '%s' "
-            "[blocking=%s, logname=%s, kwargs=%s]" % (
-                "recursively " if recurse else "",
-                self.hostname, source, destination,
-                str(blocking), str(logname), str(kwargs)
-            )
+        logname = (
+            logname if logname is not None else
+            "copy-from-%s-%s" % (source, destination)
         )
+        logfiles = log_paths(
+            self.common.build_dir(),
+            "%s-%s" % (logname, self.blade_hostname())
+        )
+        recurse_option = ['-r'] if recurse else []
+        cmd = [
+            'scp', '-i', self.private_key_path, *recurse_option, *self.options,
+            'root@%s:%s' % (self.hostname, destination),
+            source
+        ]
+        try:
+            return self.__run(cmd, blocking, *logfiles, **kwargs)
+        except ContextualError:
+            # If it is one of ours just send it on its way to be handled
+            raise
+        except Exception as err:
+            # Not one of ours, turn it into one of ours
+            raise ContextualError(
+                "failed to copy file '%s' from 'root@%s:%s' "
+                "using command: %s - %s" % (
+                    destination, self.hostname, source, str(cmd), str(err)
+                ),
+                *logfiles,
+            ) from err
 
     def run_command(self, cmd, blocking=True, logfiles=None, **kwargs):
         cmd = self._render_cmd(cmd)
-        info_msg("running '%s' on '%s'" % (cmd, self.hostname))
+        logfiles = logfiles if logfiles is not None else (None, None)
+        ssh_cmd = [
+            'ssh', '-i', self.private_key_path, *self.options,
+            'root@%s' % (self.hostname), cmd
+        ]
+        try:
+            return self.__run(ssh_cmd, blocking, *logfiles, **kwargs)
+        except ContextualError:
+            # If it is one of ours just send it on its way to be handled
+            raise
+        except Exception as err:
+            # Not one of ours, turn it into one of ours
+            raise ContextualError(
+                "failed to run command '%s' on '%s' - %s" % (
+                    cmd, self.hostname, str(err)
+                ),
+                *logfiles
+            ) from err
 
 
 class BladeSSHConnectionSet(BladeSSHConnectionSetBase, BladeConnectionSet):

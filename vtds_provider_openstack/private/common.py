@@ -21,7 +21,7 @@
 # ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 # OTHER DEALINGS IN THE SOFTWARE.
 """A class that provides common tools based on configuration
-and so forth that relate to the GCP vTDS provider.
+and so forth that relate to the OpenStack vTDS provider.
 
 """
 from os.path import join as path_join
@@ -50,6 +50,7 @@ class Common:
         """
         self.config = config
         self.build_directory = build_dir
+        self.tofu_dir = self.build_directory + "/tofu"
 
     def __get_blade(self, blade_class):
         """class private: retrieve the blade class deascription for the
@@ -159,7 +160,7 @@ class Common:
         if not ip_addrs:
             raise ContextualError(
                 "provider config error: Virtual Blade class '%s' has no "
-                "'ip_addrs' configured"
+                "'ip_addrs' configured" % blade_class
             )
         if instance >= len(ip_addrs):
             raise ContextualError(
@@ -194,22 +195,7 @@ class Common:
             )
         return [name]
 
-    def blade_ssh_key_secret(self, blade_class):
-        """Return the name of the secret used to store the SSH key
-        pair used to reach blades of the specified class through a
-        tunneled SSH connection.
-
-        """
-        blade = self.__get_blade(blade_class)
-        secret_name = blade.get('ssh_key_secret', None)
-        if secret_name is None:
-            raise ContextualError(
-                "provider config error: no 'ssh_key_secret' "
-                "found in blade class '%s'" % blade_class
-            )
-        return secret_name
-
-    def ssh_key_paths(self, secret_name, ignore_missing=False):
+    def ssh_key_paths(self, ignore_missing=False):
         """Return a tuple of paths to files containing the public and
         private SSH keys used to to authenticate with blades of the
         specified blade class. The tuple is in the form '(public_path,
@@ -222,9 +208,9 @@ class Common:
         ContextualError if they cannot.
 
         """
-        ssh_dir = path_join(self.build_dir(), 'blade_ssh_keys', secret_name)
-        private_path = path_join(ssh_dir, "id_rsa")
-        public_path = path_join(ssh_dir, "id_rsa.pub")
+        ssh_dir = self.tofu_dir
+        private_path = path_join(ssh_dir, "private_key.pem")
+        public_path = path_join(ssh_dir, "public_key.pem")
         if not ignore_missing:
             try:
                 # Verify that we can open both paths. No need to do
